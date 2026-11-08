@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wayfinder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+            background-color: #e5e7eb;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #111827;
+            -webkit-font-smoothing: antialiased;
+        }
+        /* Clean Phone Frame */
+        .phone-frame {
+            width: 390px;
+            height: 800px;
+            background: #ffffff;
+            border-radius: 42px;
+            border: 8px solid #1f2937;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        .leaflet-control-attribution { display: none !important; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+
+        /* Clean Navigation Location Dot */
+        .nav-puck {
+            width: 18px;
+            height: 18px;
+            background: #0066ff;
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        }
+        .nav-puck.warning {
+            background: #dc2626;
+        }
+    </style>
+</head>
+<body class="p-4">
+
+    <div class="phone-frame">
+
+        <!-- CLEAN iOS STATUS BAR -->
+        <div class="px-7 pt-3.5 pb-2 bg-white flex items-center justify-between text-xs font-semibold text-gray-900 z-30">
+            <span>9:41</span>
+            <div class="flex items-center gap-1.5 text-gray-800">
+                <i class="fa-solid fa-signal text-[11px]"></i>
+                <i class="fa-solid fa-wifi text-[11px]"></i>
+                <i class="fa-solid fa-battery-full text-sm"></i>
+            </div>
+        </div>
+
+        <!-- ==================== TAB 1: MAP & NAVIGATION ==================== -->
+        <div id="view-map" class="flex-1 relative flex flex-col overflow-hidden">
+
+            <!-- Floating Destination Bar (Apple Maps / Uber Style) -->
+            <div id="top-search-pill" class="absolute top-3 left-4 right-4 z-20 flex items-center justify-between bg-white px-4 py-3 rounded-2xl shadow-md border border-gray-100">
+                <div class="flex items-center gap-3 min-w-0 cursor-pointer" onclick="switchTab('search')">
+                    <div class="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0"></div>
+                    <div class="truncate">
+                        <p class="text-[11px] text-gray-400 font-medium leading-none">Destination</p>
+                        <p id="current-dest-label" class="text-xs font-semibold text-gray-900 truncate mt-1">Auburn Public Library</p>
+                    </div>
+                </div>
+                <button onclick="cycleMapLayer()" id="map-layer-btn" class="ml-2 px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium shrink-0 transition">
+                    Satellite
+                </button>
+            </div>
+
+            <!-- Turn-by-Turn Navigation Header (Shows during active walk) -->
+            <div id="active-nav-bar" class="hidden absolute top-3 left-4 right-4 z-20 bg-gray-900 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between">
+                <div class="flex items-center gap-3.5">
+                    <div class="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-base">
+                        <i class="fa-solid fa-arrow-up"></i>
+                    </div>
+                    <div>
+                        <p id="nav-step-title" class="text-sm font-semibold">Head west on E Main St</p>
+                        <p id="nav-step-sub" class="text-xs text-gray-400 mt-0.5">Well-lit sidewalk</p>
+                    </div>
+                </div>
+                <button onclick="stopNavigation()" class="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-xs font-medium">
+                    End
+                </button>
+            </div>
+
+            <!-- Mid-Route Hazard Warning Banner (Pops up when walking on the Direct Route) -->
+            <div id="hazard-modal" class="hidden absolute top-24 left-4 right-4 z-30 bg-white p-5 rounded-2xl shadow-2xl border border-gray-200">
+                <div class="flex items-start gap-3.5">
+                    <div class="w-9 h-9 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0 mt-0.5">
+                        <i class="fa-solid fa-triangle-exclamation text-sm"></i>
+                    </div>
+                    <div>
+                        <h4 class="text-sm font-semibold text-gray-900">Streetlight Outage Ahead</h4>
+                        <p class="text-xs text-gray-500 mt-1 leading-relaxed">
+                            3 neighbors reported broken streetlights on this block. Would you like to detour onto 4th St NE?
+                        </p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2.5 mt-4">
+                    <button onclick="switchToSafeMidWalk()" class="py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition">
+                        Take Safe Detour
+                    </button>
+                    <button onclick="dismissHazardModal()" class="py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold transition">
+                        Stay on Route
+                    </button>
+                </div>
+            </div>
+
+            <!-- THE MAP -->
+            <div id="map" class="flex-1"></div>
+
+            <!-- SPACIOUS APPLE-MAPS BOTTOM SHEET -->
+            <div class="bg-white border-t border-gray-100 px-5 pt-4 pb-5 z-20 space-y-4">
+                
+                <!-- Route Selection Cards -->
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="chooseRoute('safe')" id="card-safe" class="p-3.5 rounded-2xl border-2 border-blue-600 bg-blue-50/40 text-left transition">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-blue-600">Safe Route</span>
+                            <span class="text-[11px] font-medium text-emerald-600">Lit Streets</span>
+                        </div>
+                        <p id="safe-time-text" class="text-lg font-bold text-gray-900 mt-1">11 min</p>
+                        <p class="text-[11px] text-gray-500">0.6 mi • Avoids outage</p>
+                    </button>
+
+                    <button onclick="chooseRoute('direct')" id="card-direct" class="p-3.5 rounded-2xl border border-gray-200 bg-white text-left hover:bg-gray-50 transition">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-gray-900">Direct Route</span>
+                            <span class="text-[11px] font-medium text-red-600">1 Hazard</span>
+                        </div>
+                        <p id="direct-time-text" class="text-lg font-bold text-gray-900 mt-1">8 min</p>
+                        <p class="text-[11px] text-gray-500">0.4 mi • Unlit block</p>
+                    </button>
+                </div>
+
+                <!-- Primary Start Button -->
+                <button onclick="toggleNavigation()" id="start-nav-btn" class="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-xs transition">
+                    Start Safe Route
+                </button>
+            </div>
+        </div>
+
+        <!-- ==================== TAB 2: SEARCH DESTINATION ==================== -->
+        <div id="view-search" class="hidden flex-1 overflow-y-auto no-scrollbar bg-gray-50 p-6 space-y-6">
+            <div>
+                <h2 class="text-xl font-bold text-gray-900">Where to?</h2>
+                <p class="text-xs text-gray-500 mt-1">Search any destination or choose a saved place.</p>
+            </div>
+
+            <!-- Live Search Box (Uses Photon API — Never Blocked on JSFiddle) -->
+            <div class="bg-white p-4 rounded-2xl border border-gray-200 shadow-2xs space-y-3">
+                <div class="flex items-center gap-2.5 bg-gray-100 px-3.5 py-2.5 rounded-xl">
+                    <i class="fa-solid fa-magnifying-glass text-gray-400 text-xs"></i>
+                    <input id="place-input" type="text" placeholder="Enter street, school, or landmark..." value="Issaquah Library" class="bg-transparent text-xs font-medium text-gray-900 w-full focus:outline-none">
+                </div>
+                <button onclick="searchAddressLive()" class="w-full py-2.5 rounded-xl bg-gray-900 hover:bg-black text-white text-xs font-semibold transition">
+                    Calculate Routes
+                </button>
+                <p id="search-feedback" class="text-[11px] text-gray-400 text-center">Powered by live street routing</p>
+            </div>
+
+            <!-- Saved Destinations -->
+            <div class="space-y-2.5">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1">Saved Places</p>
+
+                <button onclick="loadPresetRoute('library')" class="w-full p-4 rounded-2xl bg-white border border-gray-200 hover:border-gray-300 flex items-center justify-between text-left transition">
+                    <div class="flex items-center gap-3.5">
+                        <div class="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-xs">
+                            <i class="fa-solid fa-book"></i>
+                        </div>
+                        <div>
+                            <p class="text-sm font-semibold text-gray-900">Auburn Public Library</p>
+                            <p class="text-xs text-gray-500">1102 Auburn Way S • 0.6 mi</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-gray-300 text-xs"></i>
+                </button>
+
+                <button onclick="loadPresetRoute('station')" class="w-full p-4 rounded-2xl bg-white border border-gray-200 hover:border-gray-300 flex items-center justify-between text-left transition">
+                    <div class="flex items-center gap-3.5">
+                        <div class="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-xs">
+                            <i class="fa-solid fa-train-subway"></i>
+                        </div>
+                        <div>
+                            <p class="text-sm font-semibold text-gray-900">Transit Station Plaza</p>
+                            <p class="text-xs text-gray-500">23 A St SW • 0.8 mi</p>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-gray-300 text-xs"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- ==================== TAB 3: REPORT A STREET HAZARD ==================== -->
+        <div id="view-report" class="hidden flex-1 overflow-y-auto no-scrollbar bg-gray-50 p-6 space-y-6">
+            <div>
+                <h2 class="text-xl font-bold text-gray-900">Report Street Issue</h2>
+                <p class="text-xs text-gray-500 mt-1">Help neighbors avoid dark blocks, flooded sidewalks, or closures.</p>
+            </div>
+
+            <!-- Issue Type Grid -->
+            <div class="grid grid-cols-2 gap-3" id="issue-type-grid">
+                <button onclick="selectIssueType(this, 'Streetlight Outage')" class="issue-btn p-4 rounded-2xl border-2 border-blue-600 bg-blue-50/40 text-left transition">
+                    <i class="fa-regular fa-lightbulb text-blue-600 text-base mb-2"></i>
+                    <p class="text-xs font-semibold text-gray-900">Streetlight Out</p>
+                    <p class="text-[11px] text-gray-500 mt-0.5">Dark sidewalk or alley</p>
+                </button>
+
+                <button onclick="selectIssueType(this, 'Flooded Sidewalk')" class="issue-btn p-4 rounded-2xl border border-gray-200 bg-white text-left transition">
+                    <i class="fa-solid fa-water text-blue-600 text-base mb-2"></i>
+                    <p class="text-xs font-semibold text-gray-900">Flooded Walk</p>
+                    <p class="text-[11px] text-gray-500 mt-0.5">Standing storm water</p>
+                </button>
+
+                <button onclick="selectIssueType(this, 'Sidewalk Blocked')" class="issue-btn p-4 rounded-2xl border border-gray-200 bg-white text-left transition">
+                    <i class="fa-solid fa-road-barrier text-blue-600 text-base mb-2"></i>
+                    <p class="text-xs font-semibold text-gray-900">Path Blocked</p>
+                    <p class="text-[11px] text-gray-500 mt-0.5">Fallen branch or work</p>
+                </button>
+
+                <button onclick="selectIssueType(this, 'Broken Crosswalk')" class="issue-btn p-4 rounded-2xl border border-gray-200 bg-white text-left transition">
+                    <i class="fa-solid fa-traffic-light text-blue-600 text-base mb-2"></i>
+                    <p class="text-xs font-semibold text-gray-900">Crosswalk Signal</p>
+                    <p class="text-[11px] text-gray-500 mt-0.5">Button or light broken</p>
+                </button>
+            </div>
+
+            <!-- Street Note Input -->
+            <div class="bg-white p-4 rounded-2xl border border-gray-200 space-y-3">
+                <label class="block text-xs font-semibold text-gray-700">Location & Details</label>
+                <input id="report-street-input" type="text" value="200 Block of E Main St" class="w-full px-3.5 py-2.5 rounded-xl bg-gray-100 text-xs font-medium text-gray-900 focus:outline-none">
+                <button onclick="submitNewHazardReport()" class="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition">
+                    Add to Map & Update Routes
+                </button>
+            </div>
+
+            <!-- Recent Nearby Reports List -->
+            <div class="space-y-2.5">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1">Recent Nearby Reports</p>
+                <div id="recent-reports-list" class="space-y-2.5">
+                    <div class="p-3.5 rounded-2xl bg-white border border-gray-200 flex items-center justify-between">
+                        <div>
+                            <p class="text-xs font-semibold text-gray-900">Streetlight Outage</p>
+                            <p class="text-[11px] text-gray-500">E Main St • Reported 18m ago</p>
+                        </div>
+                        <span class="px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-[11px] font-semibold">Active</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== TAB 4: SHARE ETA (CHECK-IN) ==================== -->
+        <div id="view-eta" class="hidden flex-1 overflow-y-auto no-scrollbar bg-gray-50 p-6 space-y-6">
+            <div>
+                <h2 class="text-xl font-bold text-gray-900">Share Live ETA</h2>
+                <p class="text-xs text-gray-500 mt-1">Let family or friends follow your walk home in real time.</p>
+            </div>
+
+            <!-- Clean Timer Card -->
+            <div class="bg-white p-6 rounded-3xl border border-gray-200 text-center space-y-3 shadow-2xs">
+                <p class="text-xs font-semibold text-blue-600">Sharing Live Location</p>
+                <div id="eta-countdown" class="text-4xl font-bold text-gray-900 tracking-tight">11:00</div>
+                <p class="text-xs text-gray-500">Estimated arrival at Auburn Public Library</p>
+
+                <div class="flex justify-center gap-2.5 pt-2">
+                    <button onclick="toggleEtaTimer()" id="eta-pause-btn" class="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold transition">
+                        Pause
+                    </button>
+                    <button onclick="endWalkSharing()" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition">
+                        End Walk
+                    </button>
+                </div>
+            </div>
+
+            <!-- Contacts List -->
+            <div class="space-y-2.5">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider px-1">Contacts Notified</p>
+
+                <div class="p-4 rounded-2xl bg-white border border-gray-200 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-xs font-bold">M</div>
+                        <div>
+                            <p class="text-xs font-semibold text-gray-900">Mom</p>
+                            <p id="mom-status-text" class="text-[11px] text-emerald-600">Following live route</p>
+                        </div>
+                    </div>
+                    <span class="text-[11px] text-gray-400 font-medium">Active</span>
+                </div>
+
+                <div class="p-4 rounded-2xl bg-white border border-gray-200 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-xs font-bold">D</div>
+                        <div>
+                            <p class="text-xs font-semibold text-gray-900">Dad</p>
+                            <p class="text-[11px] text-gray-500">Notified on arrival</p>
+                        </div>
+                    </div>
+                    <span class="text-[11px] text-gray-400 font-medium">Synced</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- CLEAN 4-TAB iOS BOTTOM NAVIGATION -->
+        <nav class="bg-white border-t border-gray-100 px-6 py-3 flex items-center justify-between z-30">
+            <button onclick="switchTab('map')" id="navbtn-map" class="flex flex-col items-center gap-1 text-blue-600">
+                <i class="fa-solid fa-location-arrow text-base"></i>
+                <span class="text-[10px] font-semibold">Navigate</span>
+            </button>
+            <button onclick="switchTab('search')" id="navbtn-search" class="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600">
+                <i class="fa-solid fa-magnifying-glass text-base"></i>
+                <span class="text-[10px] font-semibold">Search</span>
+            </button>
+            <button onclick="switchTab('report')" id="navbtn-report" class="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600">
+                <i class="fa-solid fa-circle-plus text-base"></i>
+                <span class="text-[10px] font-semibold">Report</span>
+            </button>
+            <button onclick="switchTab('eta')" id="navbtn-eta" class="flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600">
+                <i class="fa-solid fa-user-check text-base"></i>
+                <span class="text-[10px] font-semibold">Share ETA</span>
+            </button>
+        </nav>
+
+    </div>
+
+    <script>
+        // ==================== 1. MAP INITIALIZATION (ESRI & CARTO — NEVER BLOCKED IN JSFIDDLE) ====================
+        const map = L.map('map', { zoomControl: false }).setView([47.3075, -122.2255], 15);
+
+        // Tile Layer 1: Esri World Street Map (Rich detail, 100% open CORS, never blocked on JSFiddle)
+        const esriStreetLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19
+        });
+
+        // Tile Layer 2: Esri World Satellite Imagery
+        const esriSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19
+        });
+
+        esriStreetLayer.addTo(map);
+        let isSatellite = false;
+
+        window.cycleMapLayer = function() {
+            isSatellite = !isSatellite;
+            const btn = document.getElementById('map-layer-btn');
+            if (isSatellite) {
+                map.removeLayer(esriStreetLayer);
+                esriSatLayer.addTo(map);
+                btn.innerText = 'Street Map';
+            } else {
+                map.removeLayer(esriSatLayer);
+                esriStreetLayer.addTo(map);
+                btn.innerText = 'Satellite';
+            }
+        };
+
+        // ==================== 2. ROUTE DATA & OSRM STREET GEOMETRY ====================
+        const routesDB = {
+            library: {
+                name: "Auburn Public Library",
+                start: [47.3075, -122.2185],
+                end: [47.3065, -122.2318],
+                safeWaypoints: [
+                    [47.3075, -122.2185],
+                    [47.3108, -122.2185],
+                    [47.3108, -122.2298],
+                    [47.3065, -122.2298],
+                    [47.3065, -122.2318]
+                ],
+                directWaypoints: [
+                    [47.3075, -122.2185],
+                    [47.3075, -122.2250],
+                    [47.3075, -122.2298],
+                    [47.3065, -122.2298],
+                    [47.3065, -122.2318]
+                ],
+                hazardPos: [47.3075, -122.2250],
+                hazardText: "Streetlight Outage (Reported by 3 neighbors)"
+            },
+            station: {
+                name: "Transit Station Plaza",
+                start: [47.3015, -122.2180],
+                end: [47.3072, -122.2295],
+                safeWaypoints: [
+                    [47.3015, -122.2180],
+                    [47.3055, -122.2180],
+                    [47.3055, -122.2295],
+                    [47.3072, -122.2295]
+                ],
+                directWaypoints: [
+                    [47.3015, -122.2180],
+                    [47.3038, -122.2240],
+                    [47.3072, -122.2295]
+                ],
+                hazardPos: [47.3038, -122.2240],
+                hazardText: "Flooded Sidewalk"
+            }
+        };
+
+        let activeKey = 'library';
+        let selectedMode = 'safe'; // 'safe' or 'direct'
+        let safePathCoords = [];
+        let directPathCoords = [];
+        let drawnLayers = [];
+        let safePolyline = null;
+        let directPolyline = null;
+        let userPuck = null;
+        let simTimer = null;
+        let simPoints = [];
+        let simIndex = 0;
+        let modalShown = false;
+
+        async function getSnappedStreetCoords(waypoints) {
+            const query = waypoints.map(p => `${p[1]},${p[0]}`).join(';');
+            try {
+                const res = await fetch(`https://router.project-osrm.org/route/v1/foot/${query}?overview=full&geometries=geojson`);
+                const data = await res.json();
+                if (data.code === 'Ok' && data.routes.length > 0) {
+                    return data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                }
+            } catch (e) {}
+            return waypoints;
+        }
+
+        async function drawCurrentRoute() {
+            stopNavigation();
+            drawnLayers.forEach(l => map.removeLayer(l));
+            drawnLayers = [];
+
+            const r = routesDB[activeKey];
+            document.getElementById('current-dest-label').innerText = r.name;
+
+            safePathCoords = await getSnappedStreetCoords(r.safeWaypoints);
+            directPathCoords = await getSnappedStreetCoords(r.directWaypoints);
+
+            // 1. Hazard Zone Circle
+            const hazardCircle = L.circle(r.hazardPos, {
+                color: '#dc2626',
+                fillColor: '#ef4444',
+                fillOpacity: 0.22,
+                radius: 105,
+                weight: 1.5
+            }).addTo(map).bindPopup(`<b>${r.hazardText}</b>`);
+            drawnLayers.push(hazardCircle);
+
+            // 2. Direct Route (Dashed Red/Gray)
+            directPolyline = L.polyline(directPathCoords, {
+                color: '#dc2626',
+                weight: selectedMode === 'direct' ? 5 : 3.5,
+                dashArray: '7, 7',
+                opacity: selectedMode === 'direct' ? 0.95 : 0.55
+            }).addTo(map);
+            drawnLayers.push(directPolyline);
+
+            // 3. Safe Route (Solid Apple Blue)
+            safePolyline = L.polyline(safePathCoords, {
+                color: '#0066ff',
+                weight: selectedMode === 'safe' ? 6 : 3.5,
+                opacity: selectedMode === 'safe' ? 0.95 : 0.45
+            }).addTo(map);
+            drawnLayers.push(safePolyline);
+
+            // 4. Destination Marker
+            const destIcon = L.divIcon({
+                className: '',
+                html: `<div style="background:#111827;color:white;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2.5px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:10px;"><i class="fa-solid fa-flag-checkered"></i></div>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+            drawnLayers.push(L.marker(r.end, { icon: destIcon }).addTo(map));
+
+            // 5. User Navigation Dot
+            const puckIcon = L.divIcon({
+                className: '',
+                html: `<div id="puck-el" class="nav-puck ${selectedMode === 'direct' ? 'warning' : ''}"></div>`,
+                iconSize: [18, 18],
+                iconAnchor: [9, 9]
+            });
+            userPuck = L.marker(r.start, { icon: puckIcon, zIndexOffset: 1000 }).addTo(map);
+            drawnLayers.push(userPuck);
+
+            map.fitBounds(L.latLngBounds(safePathCoords.concat(directPathCoords)), { padding: [50, 50] });
+        }
+
+        // ==================== 3. SELECT SAFE VS DIRECT ROUTE ====================
+        window.chooseRoute = function(mode) {
+            stopNavigation();
+            selectedMode = mode;
+
+            const safeCard = document.getElementById('card-safe');
+            const directCard = document.getElementById('card-direct');
+            const startBtn = document.getElementById('start-nav-btn');
+
+            if (mode === 'safe') {
+                safeCard.className = 'p-3.5 rounded-2xl border-2 border-blue-600 bg-blue-50/40 text-left transition';
+                directCard.className = 'p-3.5 rounded-2xl border border-gray-200 bg-white text-left hover:bg-gray-50 transition';
+                startBtn.innerText = 'Start Safe Route';
+                startBtn.className = 'w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-xs transition';
+                if (safePolyline) safePolyline.setStyle({ weight: 6, opacity: 0.95 });
+                if (directPolyline) directPolyline.setStyle({ weight: 3.5, opacity: 0.5 });
+            } else {
+                directCard.className = 'p-3.5 rounded-2xl border-2 border-red-600 bg-red-50/30 text-left transition';
+                safeCard.className = 'p-3.5 rounded-2xl border border-gray-200 bg-white text-left hover:bg-gray-50 transition';
+                startBtn.innerText = 'Start Direct Route';
+                startBtn.className = 'w-full py-3.5 rounded-2xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold shadow-xs transition';
+                if (directPolyline) directPolyline.setStyle({ weight: 5.5, opacity: 0.95 });
+                if (safePolyline) safePolyline.setStyle({ weight: 3.5, opacity: 0.4 });
+            }
+
+            const puckEl = document.getElementById('puck-el');
+            if (puckEl) {
+                puckEl.className = mode === 'direct' ? 'nav-puck warning' : 'nav-puck';
+            }
+        };
+
+        // ==================== 4. LIVE WALK NAVIGATION (BOTH SAFE & DIRECT WORK) ====================
+        function expandCoords(coords, density = 8) {
+            const out = [];
+            for (let i = 0; i < coords.length - 1; i++) {
+                const a = coords[i];
+                const b = coords[i + 1];
+                for (let s = 0; s < density; s++) {
+                    const t = s / density;
+                    out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+                }
+            }
+            out.push(coords[coords.length - 1]);
+            return out;
+        }
+
+        window.toggleNavigation = function() {
+            if (simTimer) {
+                stopNavigation();
+                return;
+            }
+
+            const base = selectedMode === 'safe' ? safePathCoords : directPathCoords;
+            simPoints = expandCoords(base, 8);
+            simIndex = 0;
+            modalShown = false;
+
+            document.getElementById('top-search-pill').classList.add('hidden');
+            document.getElementById('active-nav-bar').classList.remove('hidden');
+            document.getElementById('start-nav-btn').innerText = 'End Route';
+
+            if (selectedMode === 'safe') {
+                document.getElementById('nav-step-title').innerText = 'Following Safe Route';
+                document.getElementById('nav-step-sub').innerText = 'Staying on well-lit main streets';
+            } else {
+                document.getElementById('nav-step-title').innerText = 'Following Direct Route';
+                document.getElementById('nav-step-sub').innerText = 'Caution: Reported outage ahead';
+            }
+
+            startSimLoop();
+        };
+
+        function startSimLoop() {
+            simTimer = setInterval(() => {
+                if (simIndex >= simPoints.length) {
+                    stopNavigation();
+                    return;
+                }
+                const pt = simPoints[simIndex];
+                userPuck.setLatLng(pt);
+                map.panTo(pt, { animate: true, duration: 0.2 });
+
+                const r = routesDB[activeKey];
+                if (selectedMode === 'direct' && !modalShown && map.distance(pt, r.hazardPos) < 95) {
+                    modalShown = true;
+                    clearInterval(simTimer);
+                    simTimer = null;
+                    document.getElementById('hazard-modal').classList.remove('hidden');
+                    return;
+                }
+                simIndex++;
+            }, 180);
+        }
+
+        window.switchToSafeMidWalk = async function() {
+            document.getElementById('hazard-modal').classList.add('hidden');
+            const pos = userPuck.getLatLng();
+            const r = routesDB[activeKey];
+
+            const detourWps = [[pos.lat, pos.lng], r.safeWaypoints[2], r.end];
+            const detourCoords = await getSnappedStreetCoords(detourWps);
+
+            const detourLine = L.polyline(detourCoords, {
+                color: '#0066ff',
+                weight: 6,
+                opacity: 0.95
+            }).addTo(map);
+            drawnLayers.push(detourLine);
+
+            selectedMode = 'safe';
+            const puckEl = document.getElementById('puck-el');
+            if (puckEl) puckEl.className = 'nav-puck';
+
+            document.getElementById('nav-step-title').innerText = 'Rerouted to Safe Street';
+            document.getElementById('nav-step-sub').innerText = 'Avoiding reported streetlight outage';
+
+            simPoints = expandCoords(detourCoords, 8);
+            simIndex = 0;
+            startSimLoop();
+        };
+
+        window.dismissHazardModal = function() {
+            document.getElementById('hazard-modal').classList.add('hidden');
+            simIndex++;
+            startSimLoop();
+        };
+
+        window.stopNavigation = function() {
+            if (simTimer) clearInterval(simTimer);
+            simTimer = null;
+            document.getElementById('hazard-modal').classList.add('hidden');
+            document.getElementById('active-nav-bar').classList.add('hidden');
+            document.getElementById('top-search-pill').classList.remove('hidden');
+            document.getElementById('start-nav-btn').innerText =
+                selectedMode === 'safe' ? 'Start Safe Route' : 'Start Direct Route';
+        };
+
+        // ==================== 5. LIVE SEARCH API (PHOTON BY KOMOOT — NEVER BLOCKED ON JSFIDDLE) ====================
+        window.searchAddressLive = async function() {
+            const q = document.getElementById('place-input').value.trim();
+            if (!q) return;
+            const fb = document.getElementById('search-feedback');
+            fb.innerText = 'Finding address...';
+
+            try {
+                const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1`);
+                const data = await res.json();
+                if (data.features && data.features.length > 0) {
+                    const coords = data.features[0].geometry.coordinates; // [lon, lat]
+                    const lat = coords[1];
+                    const lon = coords[0];
+                    const name = data.features[0].properties.name || q;
+
+                    routesDB.custom = {
+                        name: name,
+                        start: [lat + 0.0040, lon + 0.0060],
+                        end: [lat, lon],
+                        safeWaypoints: [
+                            [lat + 0.0040, lon + 0.0060],
+                            [lat + 0.0045, lon + 0.0010],
+                            [lat, lon]
+                        ],
+                        directWaypoints: [
+                            [lat + 0.0040, lon + 0.0060],
+                            [lat + 0.0020, lon + 0.0030],
+                            [lat, lon]
+                        ],
+                        hazardPos: [lat + 0.0020, lon + 0.0030],
+                        hazardText: "Unlit Street Segment"
+                    };
+
+                    activeKey = 'custom';
+                    fb.innerText = `Routed to ${name}`;
+                    switchTab('map');
+                    await drawCurrentRoute();
+                } else {
+                    fb.innerText = 'Address not found. Try a nearby city or landmark.';
+                }
+            } catch (e) {
+                fb.innerText = 'Could not reach address service.';
+            }
+        };
+
+        window.loadPresetRoute = function(key) {
+            activeKey = key;
+            switchTab('map');
+            drawCurrentRoute();
+        };
+
+        // ==================== 6. REPORT ISSUE TAB ====================
+        let currentIssueType = 'Streetlight Outage';
+
+        window.selectIssueType = function(btn, typeName) {
+            currentIssueType = typeName;
+            document.querySelectorAll('.issue-btn').forEach(b => {
+                b.className = 'issue-btn p-4 rounded-2xl border border-gray-200 bg-white text-left transition';
+            });
+            btn.className = 'issue-btn p-4 rounded-2xl border-2 border-blue-600 bg-blue-50/40 text-left transition';
+        };
+
+        window.submitNewHazardReport = function() {
+            const loc = document.getElementById('report-street-input').value || 'Main St';
+            const list = document.getElementById('recent-reports-list');
+
+            const item = document.createElement('div');
+            item.className = 'p-3.5 rounded-2xl bg-white border border-gray-200 flex items-center justify-between';
+            item.innerHTML = `
+                <div>
+                    <p class="text-xs font-semibold text-gray-900">${currentIssueType}</p>
+                    <p class="text-[11px] text-gray-500">${loc} • Just now</p>
+                </div>
+                <span class="px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-[11px] font-semibold">Active</span>
+            `;
+            list.prepend(item);
+
+            // Also drop a new hazard marker on the map and switch to map view
+            const r = routesDB[activeKey];
+            r.hazardText = `${currentIssueType} at ${loc}`;
+            switchTab('map');
+            drawCurrentRoute();
+        };
+
+        // ==================== 7. SHARE ETA TIMER TAB ====================
+        let etaSec = 660;
+        let etaRunning = true;
+
+        setInterval(() => {
+            if (!etaRunning || etaSec <= 0) return;
+            etaSec--;
+            const m = Math.floor(etaSec / 60);
+            const s = etaSec % 60;
+            document.getElementById('eta-countdown').innerText = `${m}:${s < 10 ? '0' : ''}${s}`;
+        }, 1000);
+
+        window.toggleEtaTimer = function() {
+            etaRunning = !etaRunning;
+            document.getElementById('eta-pause-btn').innerText = etaRunning ? 'Pause' : 'Resume';
+        };
+
+        window.endWalkSharing = function() {
+            etaRunning = false;
+            document.getElementById('eta-countdown').innerText = 'Arrived';
+            document.getElementById('mom-status-text').innerText = 'Notified of safe arrival';
+        };
+
+        // ==================== 8. TAB NAVIGATION ====================
+        window.switchTab = function(tab) {
+            ['map', 'search', 'report', 'eta'].forEach(t => {
+                document.getElementById('view-' + t).classList.add('hidden');
+                document.getElementById('navbtn-' + t).className = 'flex flex-col items-center gap-1 text-gray-400 hover:text-gray-600';
+            });
+            document.getElementById('view-' + tab).classList.remove('hidden');
+            document.getElementById('navbtn-' + tab).className = 'flex flex-col items-center gap-1 text-blue-600';
+
+            if (tab === 'map') {
+                setTimeout(() => map.invalidateSize(), 150);
+            }
+        };
+
+        // Initialize Map
+        drawCurrentRoute();
+    </script>
+</body>
+</html>
