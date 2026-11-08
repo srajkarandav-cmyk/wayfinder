@@ -1,6 +1,9 @@
 # Wayfinder: Hazard-Aware Pedestrian Navigation
 
-Live demo: (https://youtu.be/Kn5LZ6h9aCo?)
+Live demo: https://github.com/srajkarandav-cmyk/wayfinder
+
+Video demo:(https://youtu.be/Kn5LZ6h9aCo?)
+
 A web app that compares a safe walking route and a direct route, and warns you when you approach a hazard. Built for the 2026 Congressional App Challenge.
 
 ## Features
