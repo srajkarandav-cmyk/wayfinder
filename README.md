@@ -1,6 +1,6 @@
 # Wayfinder: Hazard-Aware Pedestrian Navigation
 
-Live demo: https://github.com/srajkarandav-cmyk/wayfinder
+Live demo: srajkarandav-cmyk.github.io/wayfinder/
 
 Video demo:(https://youtu.be/Kn5LZ6h9aCo?)
 
